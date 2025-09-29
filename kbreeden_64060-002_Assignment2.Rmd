@@ -1,0 +1,315 @@
+---
+title: "BA 64060 Assignment 2"
+author: "Kyle Breeden"
+date: "2025-09-28"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+#rm(list = ls())
+#Use readr package for faster and more efficient reading
+#install.packages("readr") #not needed if already installed
+library(readr)
+assign2_dataset <- read_csv("C:/Users/kylej/OneDrive/Documents/BA 64060/Assignment 2/Data/UniversalBank.CSV")
+```
+```{r}
+#Use Spec function to see column specifications
+spec(assign2_dataset)
+```
+```{r}
+#partition data into training (60%) and validation (40%) sets
+#use code from BA 6460 github BUT note the example code is for training, validation, & test sets
+#I must portion into training & validation ONLY to start, I must change example code
+#install.packages("caret")
+library(caret)
+#assigning the personal loan and education variables as factors was crucial to getting the transformation in the next chunk to work
+assign2_dataset$`Personal Loan` <-factor(assign2_dataset$`Personal Loan`, levels = c(0,1)) 
+assign2_dataset$Education <- factor(assign2_dataset$Education, levels = c(1,2,3))
+set.seed(15) #can be any integer but must stay consistent so I can reproduce results
+Train_Index = createDataPartition(assign2_dataset$`Personal Loan`,p = 0.6, list=FALSE) # 60% reserved for Train
+Train_Data = assign2_dataset[Train_Index,]
+Validation_Data = assign2_dataset[-Train_Index,] #rest as validation
+```
+
+
+```{r}
+#for number 1, I need to transform education into dummy variables
+#dummy variables are provided in the assignment: Education_1, Education_2, & Education_3
+#use dummyVars function of caret package; it will look for categorical variables with more than 2 categories & prepare to split
+#library(caret) #already called caret library, no need to repeat
+dummies <- dummyVars(`Personal Loan` ~ ., data = Train_Data, fullRank = FALSE)
+Train_predictors <- predict(dummies, newdata = Train_Data)
+Valid_predictors <- predict(dummies, newdata = Validation_Data)
+#change new education variable headings
+colnames(Train_predictors) <- sub("^Education[ ._]([123])$", "Education_\\1",colnames(Train_predictors))
+colnames(Valid_predictors) <- sub("^Education[ ._]([123])$", "Education_\\1",colnames(Valid_predictors))
+#convert matrices to data.frames
+Train_transformed <- as.data.frame(Train_predictors)
+Valid_transformed <- as.data.frame(Valid_predictors)
+#drop ID and zip code using dplyr
+library(dplyr)
+#next 2 lines would not work despise matching col name, "error in select(): Can't select columns that don't exist"
+#Subset_Train <- Train_transformed %>% select(-ID, -`ZIP Code`)
+#subset_Valid <- Valid_transformed %>% select(-ID, -`ZIP Code`)
+Subset_Train <- Train_transformed %>% select(-ID, -contains("ZIP Code"))
+Subset_Valid <- Valid_transformed %>% select(-ID, -contains("ZIP Code"))
+#use preProcess() from the caret package to normalize data
+#normalize only continuous variables
+#use/adapt github example
+cols_to_scale <- c("Age", "Experience", "Income", "Family", "CCAvg", "Mortgage")
+norm.values <- preProcess(Subset_Train[, cols_to_scale, drop = FALSE], method=c("center", "scale"))
+#make copies then apply norm to both subsets
+Subset_Train_scaled <- Subset_Train
+Subset_Valid_scaled <- Subset_Valid
+Subset_Train_scaled[, cols_to_scale] <- predict(norm.values, Subset_Train[, cols_to_scale, drop = FALSE])
+Subset_Valid_scaled[, cols_to_scale] <- predict(norm.values, Subset_Valid[, cols_to_scale, drop = FALSE])
+#getting the variance for this exercise is more difficult (for me) than what is shown in the github example
+summary(Subset_Train_scaled)
+train_vars <- Subset_Train_scaled %>% summarise(across(all_of(cols_to_scale), ~ var(.x, na.rm = TRUE)))
+summary(Subset_Valid_scaled)
+valid_vars <- Subset_Valid_scaled %>% summarise(across(all_of(cols_to_scale), ~ var(.x, na.rm = TRUE)))
+#add outcome variable back in
+#this was avoided in github example, although I am unsure how 
+#I believe the code below will work because the rows remained in the same order when transformed and scaled
+Subset_Train_scaled$`Personal Loan` <- Train_Data$`Personal Loan`
+Subset_Valid_scaled$`Personal Loan` <- Validation_Data$`Personal Loan`
+```
+
+```{r}
+#Apply knn using FNN package
+# # install if needed
+#use kNN Implementation in R slides as a guide
+library(FNN)
+Train_Predictors <- Subset_Train_scaled[,1:13]
+Valid_Predictors <- Subset_Valid_scaled [,1:13]
+
+Train_labels <- factor(Subset_Train_scaled[,14], levels = c(0,1))
+Valid_labels <- factor(Subset_Valid_scaled[,14], levels = c(0,1))
+
+#train a knn model where k=1
+Predicted_Valid_labels <- knn(train = Train_Predictors, test = Valid_Predictors, cl = Train_labels, k = 1)
+head(Predicted_Valid_labels)
+```
+```{r}
+#create data frame with fields dictated bu the assignment directions
+Random_customer_df <- data.frame(
+  Age = 40,
+  Experience = 10,
+  Income = 84,
+  Family = 2,
+  CCAvg = 2,
+  Education_1 = 0,
+  Education_2 = 1,
+  Education_3 = 0,
+  Mortgage = 0,
+  `Securities Account` = 0,
+  `CD Account` = 0,
+  Online = 1,
+  CreditCard = 1,
+  `Personal Loan` = NA)
+#scale new row
+cols_to_scale <- c("Age", "Experience", "Income", "Family", "CCAvg", "Mortgage")
+Random_customer_df[, cols_to_scale] <- predict(norm.values, Random_customer_df[, cols_to_scale, drop = FALSE])
+
+```
+
+```{r}
+#Predict classification of customer
+library(FNN)
+one_pred_fnn <- knn(train = as.matrix(Train_Predictors),
+                    test  = as.matrix(Random_customer_df[,1:13]),
+                    cl    = Train_labels,
+                    k     = 1)
+one_pred_fnn
+```
+#Based on the above k-NN prediction, the customer from question 1 would NOT accept the personal loan.
+
+```{r}
+#What is a choice of k that balances between overfitting and ignoring the predictor information?
+#To determine k, we use the performance on the validation set
+#use/modify code from github
+library(caret)
+accuracy.df <- data.frame(k = seq(1, 14, 1), accuracy = rep(0, 14))
+# compute knn for different k on validation.
+for(i in 1:14) {
+  knn.pred <- knn(train = Train_Predictors,test = Valid_Predictors, cl = Train_labels, k = i)
+   cm <- confusionMatrix(knn.pred, Valid_labels)
+  accuracy.df[i, "accuracy"] <- cm$overall["Accuracy"]
+} 
+accuracy.df
+
+
+
+```
+#Based on the accuracy data frame above, 3 is the choice of k that balances between overfitting and ignoring the predictor information.
+
+```{r}
+#Show the confusion matrix for the validation data that results from using the best k.
+Pred_best_k <- knn(train = as.matrix(Train_Predictors),
+                    test  = as.matrix(Valid_Predictors),
+                    cl    = Train_labels,
+                    k     = 3)
+library(caret)
+cm_best_k<- caret::confusionMatrix(data = Pred_best_k,
+                                  reference = Valid_labels,
+                                  positive = "1")
+cm_best_k
+
+length(Pred_best_k)
+length(Valid_labels)
+is.factor(Pred_best_k); is.factor(Valid_labels)
+
+```
+```{r}
+#another way
+#install.packages("gmodels") # install if necessary
+library("gmodels")
+CrossTable(x=Valid_labels,y=Pred_best_k, prop.chisq = FALSE)
+```
+```{r}
+#Customer in question 4 has same caharteristics as question 1
+#library(FNN)
+two_pred_fnn <- knn(train = as.matrix(Train_Predictors),
+                    test  = as.matrix(Random_customer_df[,1:13]),
+                    cl    = Train_labels,
+                    k     = 3)
+two_pred_fnn
+```
+#Based on the above k-NN prediction, the customer from question 4 would NOT accept the personal loan.
+
+```{r}
+#Repartition into training (50%), validation (30%), and test (20%) sets
+set.seed(15)
+Test_Index_two = createDataPartition(assign2_dataset$`Personal Loan`,p = 0.2, list=FALSE) #20% reserved for test
+Test_Data_two = assign2_dataset[Test_Index_two,]
+TraVal_Data_two = assign2_dataset[-Test_Index_two,] #Validation and Training is the rest
+
+Train_Index_two = createDataPartition(TraVal_Data_two$`Personal Loan`,p = 0.5, list=FALSE) #50% reserved for training
+Train_Data_two = TraVal_Data_two[Train_Index_two,]
+Validation_Data_two = TraVal_Data_two[-Train_Index_two,] #rest as validation
+
+
+```
+
+
+```{r}
+#normalize data
+# Copy the original data per example in github
+train.norm.df  <- Train_Data_two
+valid.norm.df  <- Validation_Data_two
+traval.norm.df <- TraVal_Data_two    
+test.norm.df   <- Test_Data_two 
+
+cols_to_scale_two <- c("Age", "Experience", "Income", "Family", "CCAvg", "Mortgage", "Securities Account", "CD Account", "Online", "CreditCard")
+
+
+#use preProcess() from the caret package to normalize .
+norm.values_two <- preProcess(Train_Data_two[, cols_to_scale_two, drop = FALSE], 
+                          method = c("center", "scale"))
+
+train.norm.df[, cols_to_scale_two] <- predict(norm.values_two, Train_Data_two[, cols_to_scale_two, drop = FALSE])
+valid.norm.df[, cols_to_scale_two] <- predict(norm.values_two, Validation_Data_two[, cols_to_scale_two, drop = FALSE])
+traval.norm.df[, cols_to_scale_two] <- predict(norm.values_two, TraVal_Data_two[, cols_to_scale_two, drop = FALSE])
+test.norm.df[, cols_to_scale_two] <- predict(norm.values_two, Test_Data_two[, cols_to_scale_two, drop = FALSE])
+```
+
+```{r}
+#replace Education with dummy variables
+#I thought this might be easier than the way I did it last time; it wasn't
+#by far the most time consuming thing I had to do on this assignment; has to be a better way
+library(caret)
+dummy_model <- dummyVars(~ Education, data = test.norm.df, fullRank = FALSE) 
+edu_dummies <- predict(dummy_model, newdata = test.norm.df)
+colnames(edu_dummies) <- sub("^Education[ ._]([123])$", "Education_\\1", colnames(edu_dummies))
+test.norm.df <- cbind(test.norm.df, edu_dummies)
+test.norm.df$Education <- NULL
+
+#repeat for train and valid
+train.norm.df$Education <- factor(as.character(train.norm.df$Education), levels = c("1","2","3"))
+valid.norm.df$Education <- factor(as.character(valid.norm.df$Education), levels = c("1","2","3"))
+
+
+edu_model <- dummyVars(~ Education,
+                       data   = train.norm.df[, "Education", drop = FALSE],
+                       fullRank = FALSE)
+
+
+edu_train <- predict(edu_model, newdata = train.norm.df[, "Education", drop = FALSE])
+edu_valid <- predict(edu_model, newdata = valid.norm.df[, "Education", drop = FALSE])
+
+
+fix_names <- function(m) {
+  colnames(m) <- sub("^Education[ ._]([123])$", "Education_\\1", colnames(m))
+  m
+}
+edu_train <- fix_names(edu_train)
+edu_valid <- fix_names(edu_valid)
+
+
+train.norm.df <- cbind(train.norm.df, edu_train); train.norm.df$Education <- NULL
+valid.norm.df <- cbind(valid.norm.df, edu_valid); valid.norm.df$Education <- NULL
+```
+
+```{r}
+#remove ID & Zip Code
+Subset_Train_two <- train.norm.df %>% select(-ID, -contains("ZIP Code"))
+Subset_Valid_two <- valid.norm.df %>% select(-ID, -contains("ZIP Code"))
+Subset_Test_two <- test.norm.df %>% select(-ID, -contains("ZIP Code")) 
+```
+
+```{r}
+#re-order data
+Train_ready <- Subset_Train_two %>% relocate(starts_with("Personal"), .after = "Education_3")
+Valid_ready <- Subset_Valid_two %>% relocate(starts_with("Personal"), .after = "Education_3")
+Test_ready <- Subset_Test_two %>% relocate(starts_with("Personal"), .after = "Education_3")
+
+#Apply knn using FNN package
+# # install if needed
+#use kNN Implementation in R slides as a guide
+library(FNN)
+Train_Predictors_two <- Train_ready[,1:13]
+Valid_Predictors_two <- Valid_ready [,1:13]
+Test_Predictors_two <- Test_ready [,1:13]
+
+Train_labels <- factor(Train_ready[,14], levels = c(0,1))
+Valid_labels <- factor(Valid_ready[,14], levels = c(0,1))
+Test_labels <- factor(Test_ready[,14], levels = c(0,1))
+
+#train a knn model where k=3
+pred_train <- knn(train = as.matrix(Train_Predictors_two),
+                  test  = as.matrix(Train_Predictors_two),
+                  cl    = Train_labels,
+                  k     = 3)
+
+pred_valid <- knn(train = as.matrix(Train_Predictors_two),
+                  test  = as.matrix(Valid_Predictors_two),
+                  cl    = Train_labels,
+                  k     = 3)
+
+pred_test  <- knn(train = as.matrix(Train_Predictors_two),
+                  test  = as.matrix(Test_Predictors_two),
+                  cl    = Train_labels,
+                  k     = 3)
+```
+
+```{r}
+#confusion matrices of test, valid, and train sets
+#Training
+library(gmodels)
+CrossTable(x = Train_labels, y = pred_train,
+           prop.chisq = FALSE)
+#Test
+CrossTable(x = Test_labels, y = pred_test,
+           prop.chisq = FALSE)
+
+#Validation
+CrossTable(x = Valid_labels, y = pred_valid,
+           prop.chisq = FALSE)
+```
+#The differences are that the Training set has more correct predictions (1804 of 1808 for "0" and 139 of 192 for "1"). The Validation and Test sets also perform well when predicting "0", but do not perform as well when predicting "1". There are more false negatives in the Training set and more false positives in the validation set. There were much less "1" cases to learn from in the training set, so the accuracy of the "1" predictions decreased in the test and validation sets when new data was introduced. This is a sign that the model overfitted the training set.
+
