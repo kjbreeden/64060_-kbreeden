@@ -1,0 +1,164 @@
+---
+title: BA 64060 Assignment 3"
+author: "Kyle Breeden"
+date: "2025-10-12"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+#rm(list = ls())
+#Use readr package for faster and more efficient reading
+#install.packages("readr") #not needed if already installed
+library(readr)
+assign3_dataset <- read_csv("C:/Users/kylej/OneDrive/Documents/BA 64060/Assignment 3/Data/UniversalBank.CSV")
+```
+
+```{r cars}
+#Use Spec function to see column specifications
+spec(assign3_dataset)
+```
+```{r}
+# create a subset to focus on 2 predictors (Online & Credit card) and the outcome (Personal Loan) per the directions
+library(dplyr)
+library(caret)
+ubank_df <- assign3_dataset %>% select(Online, CreditCard, `Personal Loan`)
+#partition data into training (60%) and validation (40%) sets
+set.seed(15) #can be any integer but must stay consistent so I can reproduce results
+Index_Train <- createDataPartition(ubank_df$`Personal Loan`,p = 0.6, list=FALSE) 
+Train <- ubank_df[Index_Train, ]
+Validation <- ubank_df[-Index_Train, ] 
+```
+```{r}
+#use functions melt() and cast() to create a pivot table with online as column variable, CC as row variable, and Loan as secondary row variable.
+#The values inside the table should convey the count
+#install.packages("reshape2")
+library(reshape2)
+trainmelt <- melt(Train, id.vars = c("CreditCard", "Online"), measure.vars = "Personal Loan", variable.name = "Measure", value.name = "Personal Loan")
+#using dcast instead of cast because it is in the reshape2 package
+pivot1 <- dcast(trainmelt, CreditCard + `Personal Loan` ~ Online, fun.aggregate = length)
+
+pivot1
+```
+```{r}
+#classifying a customer who owns a bank credit card and is actively using online banking services
+#using pivot1, what is the probability that this customer will accept the loan offer
+prob_loan_when_cc1_online1 <- 50 / (489 + 50) 
+prob_loan_when_cc1_online1
+
+
+```
+#Customers who have a bank credit card and use online banking have about a 9.3% chance of accepting the personal loan offer.
+
+```{r}
+#Create pivot table with Loan (rows) as a function of Online (columns)
+trainmelt1 <- melt(Train, id.vars = "Online", measure.vars = "Personal Loan", variable.name = "Measure", value.name = "Personal Loan")
+
+pivot2 <- dcast(trainmelt1, `Personal Loan` ~ Online, fun.aggregate = length)
+
+pivot2
+
+#Create pivot table with Loan (rows) as a function of CC.
+trainmelt2 <- melt(Train, id.vars = "CreditCard", measure.vars = "Personal Loan", variable.name = "Measure", value.name = "Personal Loan")
+
+Pivot3 <- dcast(trainmelt2, `Personal Loan` ~ CreditCard, fun.aggregate = length)
+
+Pivot3
+```
+```{r}
+#i. P(CC = 1 | Loan = 1)
+prob_cc1_when_loan1 <- 90 / (209 + 90) 
+prob_cc1_when_loan1
+percent_cc1_when_loan1 <- paste(round(prob_cc1_when_loan1 * 100, 1), "%")
+percent_cc1_when_loan1
+```
+```{r}
+#ii. P(Online = 1 | Loan = 1)
+prob_Online1_when_Loan1 <- 180 / (119 + 180)  
+prob_Online1_when_Loan1
+percent_Online1_when_Loan1 <- paste(round(prob_Online1_when_Loan1 * 100, 1), "%")
+percent_Online1_when_Loan1
+```
+```{r}
+#iii. P(Loan = 1) (the proportion of loan acceptors)
+prob_loan1 <- 299 / 3000
+prob_loan1
+percent_loan1 <- paste(round(prob_loan1 * 100, 1), "%")
+percent_loan1
+```
+```{r}
+#iV. P(CC = 1 | Loan = 0)
+prob_cc1_when_loan0 <- 798 / (1903 + 798)
+prob_cc1_when_loan0
+percent_cc1_when_loan0 <- paste(round(prob_cc1_when_loan0 * 100, 1), "%")
+percent_cc1_when_loan0 
+```
+```{r}
+#v. P(Online = 1 | Loan = 0)
+prob_Online1_when_Loan0 <- 1607 / (1094 + 1607)
+prob_Online1_when_Loan0
+percent_Online1_when_Loan0 <- paste(round(prob_Online1_when_Loan0 * 100, 1), "%")
+percent_Online1_when_Loan0
+```
+```{r}
+#vi. P(Loan = 0)
+prob_loan0 <- 2701 / 3000
+prob_loan0
+percent_loan0 <-paste(round(prob_loan0 * 100, 1), "%")
+percent_loan0
+```
+```{r}
+#Use the quantities computed above to compute the naive Bayes probability P(Loan = 1 | CC = 1, Online = 1)
+numerator <- 0.301 * 0.602 * 0.0997
+denominator <- numerator + (0.295 * 0.595 * 0.9003)
+nb_model <- numerator / denominator
+nb_model
+percent_nb_model <- paste(round(nb_model * 100, 3), "%")
+percent_nb_model
+```
+#Compare naive Bayes probability & pivot table probability for P(Loan = 1 | CC = 1, Online = 1)
+#10.3% vs. 9.3%
+#Which is more aaccurate?
+#The pivot-table estimate (~9.3%) is a more accurate estimate because it does not rely on the Naive Bayes independence assumption between CreditCard and Online given Loan.
+
+```{r}
+#question G seems like a repeat of what is above, but I will use it as an opportunity to run nb with the e1017 package
+library(e1071)
+#transform the variables into factor
+Train$`Personal Loan` <- factor(Train$`Personal Loan`, levels = c(0,1))
+Train$Online     <- factor(Train$Online, levels = c(0,1))
+Train$CreditCard <- factor(Train$CreditCard, levels = c(0,1))
+
+nb_model2 <- naiveBayes(`Personal Loan` ~ Online + CreditCard, data = Train)
+nb_model2
+```
+```{r}
+Predicted_Test_labels <-predict(nb_model2,Train)
+library("gmodels")
+CrossTable(x=Train$"Personal Loan",y=Predicted_Test_labels, prop.chisq = FALSE) 
+
+Predicted_Test_labels_raw <- predict(nb_model2,Train, type = "raw")
+head(Predicted_Test_labels_raw)
+```
+```{r}
+#find the first row where CC=1 and Online = 1 
+idx <- with(Train, CreditCard == 1 & Online == 1)
+i <- which(idx)[1]
+Predicted_Test_labels_raw[i, "1"]
+```
+```{r}
+#$check to see if a manual calculation matches
+numerator2 <- 0.3010033 * 0.6020067 * 0.09966667 
+denominator2 <- numerator2 + (0.2954461 * 0.5949648 * 0.90033333)
+nb_model3 <- numerator2 / denominator2
+nb_model3
+percent_nb_model3 <- paste(round(nb_model3 * 100, 1), "%")
+percent_nb_model3
+```
+#This number (0.1024281) is nearly the same as the number calculated in E (0.1025938).
+
+
