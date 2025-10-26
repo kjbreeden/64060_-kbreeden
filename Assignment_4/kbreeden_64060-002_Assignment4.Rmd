@@ -1,0 +1,112 @@
+---
+title: "BA 64060 Assignment 4"
+author: "Kyle Breeden"
+date: "2025-10-26"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+#rm(list = ls())
+#install.packages("tidyverse") # if necessary
+library(tidyverse)  # data manipulation
+#install.packages("factoextra") # if necessary
+library(factoextra) # clustering algorithms & visualization
+#install.packages("ISLR") # if necessary
+library(ISLR)
+#install.packages("readr") # if necessary
+set.seed(123)
+library(readr)
+assign4_dataset <- read_csv("C:/Users/kylej/OneDrive/Documents/BA 64060/Assignment 4/Pharmaceuticals.CSV")
+```
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+summary(assign4_dataset)
+```
+```{r}
+#Question a
+##use descriptive statistics above to identify numeric columns.
+assign4_numeric <- assign4_dataset[, 3:11]
+##check for missing values
+colSums(is.na(assign4_numeric))
+```
+```{r}
+##Generate correlation matrix to assess relationships within numerical variables
+cor(assign4_numeric)
+```
+##ROE, ROA, and Net_Profit_Margin are strongly correlated but the rest are moderatly or weakly coorelated. I will use Euclidean distance since most variables are moderatley or weakly correlated and scale the vartiables using z-score.
+
+```{r}
+##Scale the data frame (z-score) 
+assign4_scaled <- scale(assign4_numeric)
+##Use an elbow chart to determine k
+fviz_nbclust(assign4_scaled, kmeans, method = "wss")
+```
+##The elbow point at k = 2 provides the best value for k becasue the total within-cluster sum of squares decreases sharply up to this point but at a much slower rate beyond it.
+
+
+```{r}
+##Use silhouette method to determine the number of clusters
+fviz_nbclust(assign4_numeric, kmeans, method = "silhouette")
+```
+##The chart above shows that the optimal number of clusters is k = 2, because this value achieves the largest silhouette score among all tested cluster counts.
+
+```{r}
+##Run k-Means where K = 2
+set.seed(123)
+k2 <- kmeans(assign4_scaled, centers = 2, nstart = 25)
+
+
+##Visualize the output
+k2$centers #output the centers
+
+k2$size #Number of firms in each cluster
+
+k2$cluster[15] #Identify the cluster of the 15th observation as an example
+
+fviz_cluster(k2, data = assign4_scaled,) #Visualize the output
+
+```
+```{r}
+#Add cluster labels into original data set
+assign4_clusters <- data.frame(assign4_dataset, Cluster = k2$cluster)
+#I tried to add the symbol as the label & re-generate the cluster plot, but could not get it to work
+#Question b
+##Use the means of each variable to compare numerical variables in each cluster
+library(dplyr)
+cluster_summary <- assign4_clusters %>% group_by(Cluster) %>% summarise(across(Market_Cap:Net_Profit_Margin, mean))
+```
+##Cluster 1 represents the pharma firms with higher market cap, ROE, ROA, and Net Profit Margin and lower leverage, beta, and revenue growth. Clauster 2 represents the pharma fims with higher beta and revenue growth and lower market cap, ROE, ROA, and Net Profit Margin. The pharma firms in cluster 1 are large, profitable, and stable (lower beta, lower but steady revenue growth, and lower leverage). The pharma firms in cluster 2 are smaller growing companies with more risk.
+
+```{r}
+#Question c
+##generate tables to see distributions 
+table(assign4_clusters$Cluster, assign4_clusters$Median_Recommendation)
+table(assign4_clusters$Cluster, assign4_clusters$Location)
+table(assign4_clusters$Cluster, assign4_clusters$Exchange)
+```
+##Yes, patterns among the non-clustering variables support the financial distinctions identified earlier. Cluster 1 firms are predominantly U.S.-based, NYSE-listed, and viewed as stable performers. Cluster 2 firms are more geographically diverse, include listings on growth-oriented exchanges, and receive more favorable analyst recommendations, indicating higher perceived growth potential.
+
+```{r}
+#Question d
+#Cluster 1: Established U.S. Pharma Firms
+#Cluster 2: Emerging Pharma Firms
+k2_named <- k2
+k2_named$cluster <- factor(k2$cluster,
+                           levels = c(1, 2),
+                           labels = c("Established U.S. Pharma Firms",
+                                      "Emerging Pharma Firms"))
+
+fviz_cluster(k2_named, 
+             data = assign4_scaled,
+             ggtheme = theme_minimal(),
+             main = "K-Means Clusters of Pharmaceutical Firms (k = 2)")
+```
+
