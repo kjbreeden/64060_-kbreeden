@@ -1,0 +1,154 @@
+---
+title: "BA 64060 Assignment 5"
+author: "Kyle Breeden"
+date: "2025-11-23"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#rm(list = ls())
+library(readr)
+assign5_dataset <- read_csv("C:/Users/kylej/OneDrive/Documents/BA 64060/Assignment 5/Cereals.csv")
+```
+
+```{r cars}
+summary(assign5_dataset)
+```
+
+```{r}
+#The directions say to remove all cereals with missing values
+#See which columns have missing values and how may cereals will be lost when removing those with empty values
+colSums(is.na(assign5_dataset))
+sum(is.na(assign5_dataset))
+#You can also look in the summary statistics above
+#See which cereas will be lost
+rows_with_na <- which(!complete.cases(assign5_dataset))
+unique(assign5_dataset$name[rows_with_na])
+```
+```{r}
+#remove all cereals with missing values & then check for NAs
+assign5_clean <- na.omit(assign5_dataset)
+summary(assign5_clean)
+colSums(is.na(assign5_clean))
+sum(is.na(assign5_clean))
+```
+
+```{r}
+#Need to normalize numeric variables
+#Separate numeric and non-numeric variables
+assign5_non_numeric <- assign5_clean[ , !sapply(assign5_clean, is.numeric)]
+assign5_numeric <- assign5_clean[ , sapply(assign5_clean, is.numeric)]
+#Normalize only numeric variables
+assign5_norm <- sapply(assign5_numeric, scale)
+#Add cereal names as row labels
+row.names(assign5_norm) <- assign5_clean$name
+```
+
+
+```{r}
+#Apply hierarchical clustering to the data using Euclidean distance to the normalized measurements.
+#compute distance
+d_norm <- dist(assign5_norm, method = "euclidean")
+#Apply hierarchical clustering
+hc_single <- hclust(d_norm, method = "single")
+plot(hc_single, hang = -1, cex = 0.4, ann = FALSE)
+hc_complete <- hclust(d_norm, method = "complete")
+plot(hc_complete, hang = -1, cex = 0.4, ann = FALSE)
+hc_average <- hclust(d_norm, method = "average")
+plot(hc_average, hang = -1, cex = 0.4, ann = FALSE)
+hc_ward <- hclust(d_norm, method = "ward.D2")
+plot(hc_ward, hang = -1, cex = 0.4, ann = FALSE)
+```
+
+```{r}
+#Use Agnes to compare the clustering from single linkage, complete linkage, average linkage, and Ward.
+library(cluster)
+Agnes_single <- agnes(assign5_norm, method = "single")
+pltree(Agnes_single, hang = -1, cex  = 0.4, main = "Agnes Single")
+Agnes_complete <- agnes(assign5_norm, method = "complete")
+pltree(Agnes_complete, hang = -1, cex  = 0.4, main = "Agnes Complete")
+Agnes_average <- agnes(assign5_norm, method = "average")
+pltree(Agnes_average, hang = -1, cex  = 0.4, main = "Agnes Average")
+Agnes_ward <- agnes(assign5_norm, method = "ward")
+pltree(Agnes_ward, hang = -1, cex  = 0.4, main = "Agnes Ward")
+```
+
+```{r}
+#Choose the best method.
+#Use agglomerative coefficients (AC)
+Agnes_single$ac
+Agnes_complete$ac
+Agnes_average$ac
+Agnes_ward$ac
+```
+#Ward is the best method becasue it has the highest AC.
+#I choose 4 clsuters based on increases in merge height at 10, 14, and 22.
+
+```{r}
+#Comment on cluster stability
+#Split into partitions A & B
+set.seed(123)
+n <- nrow(assign5_norm) 
+idx <- sample(1:n, size = n/2)    
+Partition_A <- assign5_norm[idx, ]      
+Partition_B <- assign5_norm[-idx, ]  
+#Cluster Partition A
+#library(cluster)
+A_ward <- agnes(Partition_A, method = "ward")
+A_clusters <- cutree(as.hclust(A_ward), k = 4)
+#Find cluster centroids
+A_centroids <- aggregate(Partition_A, by = list(A_clusters), FUN = mean)
+#crucial step (missed at first) remove group column
+A_centroids <- A_centroids[ , -1]
+#Assign each record in partition B to the cluster with the closest centroid
+assign_cluster_B <- apply(Partition_B, 1, function(x) {
+  dists <- apply(A_centroids, 1, function(c) dist(rbind(x, c)))
+  which.min(dists)})
+#Use Agnes to cluster all data, This is to use for comparison per the directions. 
+full_ward <- agnes(assign5_norm, method = "ward")
+full_clusters <- cutree(as.hclust(full_ward), k = 4)
+#Compare clusters predicted for B using A’s centroids vs. true clusters from the full data
+full_B <- full_clusters[-idx]
+#produce a stability table
+table(Predicted_B = assign_cluster_B, FullData_B = full_B)
+```
+#Diagonal values are stable assignments, so 3, 6, 10, 7
+#Sum of diagonal values = 26
+#So 26 cereals out of partions B were assigned to the same cluster in both methods
+#Partition B contains 37 cereals, so 70% (26/37) are stable
+
+```{r}
+#comment on cluster structure
+#find cluster centroids for all cereals
+cluster_centroids <- aggregate(assign5_numeric, 
+                               by = list(Cluster = full_clusters),
+                               FUN = mean)
+cluster_centroids
+
+
+```
+#Cluster 1 is lowest calorie, highest protein, and highest fiber, so the healthiest among the clusters
+#Cluster 2 has highest calories and fat with a good amount of protein
+#Cluster 3 has high calories with the lowest protein and fiber so the least healthy cluster
+#Cluster 4 is a middle range with moderate calaries, protein, and fiber
+
+```{r}
+#Elementary School Question
+#Get a list of the healthy cereals (cluster 1)
+#Add the cluster membership to your data
+assign5_clean$cluster <- full_clusters
+#Filter to only Cluster 1 (healthy cereals)
+healthy_cereals <- assign5_clean[assign5_clean$cluster == 1, ]
+healthy_cereals$name
+
+```
+#After identifying that the healthy cluster contains only 3 of the 74 cereals remaining after removing those with missing values, I would consider re-running the clustering with 3 clusters to give the schools a larger set of healthy options.
+
+#Normilization is necessary because the variables are measured on very different scales. Normalizing ensures that variables with larger ranges (such as sodium) do not dominate the Euclidean distance calculation and that each nutritional attribute contributes proportionally to the clustering.
+
+
